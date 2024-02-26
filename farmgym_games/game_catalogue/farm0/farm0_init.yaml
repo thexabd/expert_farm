@@ -1,0 +1,17 @@
+Initial:
+  Field-0:
+    Weather-0:
+      day#int365: 1
+    Soil-0:
+      microlife_health_index#%: 75.0
+    Plant-0:
+      stage: "seed"
+      population#nb: 1.0
+    Pollinators-0:
+      occurrence#bin: True
+Terminal:
+  [
+    [{state_variable: ["Field-0", "Weather-0", "day#int365", []], function: "value", operator: ">=", ref_value: 360}],
+    [{state_variable: ["Field-0", "Plant-0", "global_stage", []], function: "value", operator: "==", ref_value: "harvested"}],
+    [{state_variable: ["Field-0", "Plant-0", "global_stage", []], function: "value", operator: "==", ref_value: "dead"}],
+  ]
