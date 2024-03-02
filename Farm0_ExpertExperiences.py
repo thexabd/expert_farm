@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 from farmgym_games.game_builder.utils_sb3 import farmgym_to_gym_observations_flattened, wrapper
 from farmgym_games.game_catalogue.farm0.farm import env as Farm0
 
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, A2C
 
 import numpy as np
 #from read import readExpertData
@@ -88,6 +88,15 @@ class Args:
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
 
+env = Farm0()
+orignal_obs, _  = env.reset()
+# Wrap to change observation and action spaces and the step function
+env.farmgym_to_gym_observations = farmgym_to_gym_observations_flattened
+env = wrapper(env)
+obs, _ = env.reset()
+expert_agent = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0001, n_epochs=15)
+expert_agent.load("PPO_student")
+
 # Making the environment
 def make_env(env_id, idx, capture_video, run_name):
 
@@ -122,16 +131,20 @@ def expert_actions_values(model, next_obs):
     next_obs = torch.tensor(next_obs).to(policy.device)
 
     with torch.no_grad():
-        action_dist = policy.get_distribution(next_obs)[0]
-    
-    #action_dist = policy.get_distribution(next_obs)
+        action_dist = policy.get_distribution(next_obs)
+
     print(type(action_dist))
+
+    #action_dist = policy.get_distribution(next_obs)
     action_prediction = action_dist.distribution.logits
-
+    log_probs = action_dist.log_prob(action_prediction)
+    
     with torch.no_grad():
-        value = policy.evaluate_actions(action_prediction)
+        value = policy.evaluate_actions(next_obs, action_prediction)
 
-    return action_prediction, action_dist, 0, value
+    print(action_prediction)
+    print(log_probs)
+    return action_prediction, log_probs, 0, value
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -156,7 +169,12 @@ class Agent(nn.Module):
 
     def get_action_and_value(self, x, action=None):
         logits = self.actor(x)
+        print(logits)
+        print("---------------------")
+        print(type(logits))
         probs = Categorical(logits=logits)
+        print("xxxxxxxxxxxxxxxxxxxxxx")
+        print(type(probs))
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(x)
@@ -206,9 +224,6 @@ if __name__ == "__main__":
     # Put agent to device and set optimizer
     agent = Agent(envs).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
-
-    expert_agent = PPO("MlpPolicy", envs, verbose=1, learning_rate=0.0001, n_epochs=15)
-    expert_agent.load("PPO_student")
 
     # Roll out buffer
     # ALGO Logic: Storage setup
