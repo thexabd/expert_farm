@@ -41,7 +41,7 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
     # Algorithm specific arguments
-    #env_id: str = "CartPole-v1"
+    env_id: str = "Farm0"
     """the id of the environment"""
     total_timesteps: int = 500000
     """total timesteps of the experiments"""
@@ -91,19 +91,17 @@ class Args:
 # Making the environment
 def make_env(env_id, idx, capture_video, run_name):
 
-    env = Farm0()
-    orignal_obs, _  = env.reset()
-    # Wrap to change observation and action spaces and the step function
-    env.farmgym_to_gym_observations = farmgym_to_gym_observations_flattened
-    env = wrapper(env)
-    obs, _ = env.reset()
-
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
-            env = env
+            env = Farm0()
+            orignal_obs, _  = env.reset()
+            # Wrap to change observation and action spaces and the step function
+            env.farmgym_to_gym_observations = farmgym_to_gym_observations_flattened
+            env = wrapper(env)
+            obs, _ = env.reset()
         # Recording statistics for analysis
         env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
@@ -116,6 +114,24 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+def expert_actions_values(model, next_obs):
+    policy = model.policy
+    #policy.device = model.policy.device
+    policy.eval()
+
+    next_obs = torch.tensor(next_obs).to(policy.device)
+
+    with torch.no_grad():
+        action_dist = policy.get_distribution(next_obs)[0]
+    
+    #action_dist = policy.get_distribution(next_obs)
+    print(type(action_dist))
+    action_prediction = action_dist.distribution.logits
+
+    with torch.no_grad():
+        value = policy.evaluate_actions(action_prediction)
+
+    return action_prediction, action_dist, 0, value
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -249,13 +265,12 @@ if __name__ == "__main__":
                 #print("Obs: ", obs[step])
                 dones[step] = next_done # Record whether the current state is a terminal state
                 #print("Done: ", dones[step])
-
                 # ALGO LOGIC: action logic
                 # Disable gradient calculations for action selection as it's not part of the optimization process
                 with torch.no_grad():
                     # Obtain the action, log probability of the action, and value estimate from the policy network
-                    if np.random.randint() < args.beta: # Probability of including expert trajectories in the rollout buffer
-                        action, value, logprob = expert_agent.predict(next_obs)
+                    if random.random() < args.beta: # Probability of including expert trajectories in the rollout buffer
+                        action, logprob, _, value = expert_actions_values(expert_agent, next_obs)
                         values[step] = value.flatten()  # Flatten the value tensor for storage
                         actions[step] = action  # Store the action
                         logprobs[step] = logprob  # Store the log probability of the action
