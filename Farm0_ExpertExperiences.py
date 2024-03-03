@@ -132,19 +132,14 @@ def expert_actions_values(model, next_obs):
 
     with torch.no_grad():
         action_dist = policy.get_distribution(next_obs)
-
-    print(type(action_dist))
-
-    #action_dist = policy.get_distribution(next_obs)
-    action_prediction = action_dist.distribution.logits
-    log_probs = action_dist.log_prob(action_prediction)
-    
-    with torch.no_grad():
-        value = policy.evaluate_actions(next_obs, action_prediction)
-
-    print(action_prediction)
-    print(log_probs)
-    return action_prediction, log_probs, 0, value
+        logits = action_dist.distribution.logits
+        action = torch.argmax(logits, dim=-1)
+        # Evaluate the log probabilities of the chosen actions
+        log_probs = action_dist.log_prob(action)
+        # Evaluate the value of the chosen actions
+        value = policy.evaluate_actions(next_obs, action)
+        value = torch.tensor(value).to(policy.device)
+    return action, log_probs, 0, value
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -169,12 +164,7 @@ class Agent(nn.Module):
 
     def get_action_and_value(self, x, action=None):
         logits = self.actor(x)
-        print(logits)
-        print("---------------------")
-        print(type(logits))
         probs = Categorical(logits=logits)
-        print("xxxxxxxxxxxxxxxxxxxxxx")
-        print(type(probs))
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(x)
