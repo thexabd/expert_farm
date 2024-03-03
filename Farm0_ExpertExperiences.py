@@ -134,12 +134,10 @@ def expert_actions_values(model, next_obs):
         action_dist = policy.get_distribution(next_obs)
         logits = action_dist.distribution.logits
         action = torch.argmax(logits, dim=-1)
-        # Evaluate the log probabilities of the chosen actions
-        log_probs = action_dist.log_prob(action)
-        # Evaluate the value of the chosen actions
-        value = policy.evaluate_actions(next_obs, action)
-        value = torch.tensor(value).to(policy.device)
-    return action, log_probs, 0, value
+        # Evaluate the value and log probability of the chosen action
+        value, log_prob, _ = policy.evaluate_actions(next_obs, action)
+    
+    return action, log_prob, 0, value
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -276,17 +274,14 @@ if __name__ == "__main__":
                     # Obtain the action, log probability of the action, and value estimate from the policy network
                     if random.random() < args.beta: # Probability of including expert trajectories in the rollout buffer
                         action, logprob, _, value = expert_actions_values(expert_agent, next_obs)
-                        values[step] = value.flatten()  # Flatten the value tensor for storage
-                        actions[step] = action  # Store the action
-                        logprobs[step] = logprob  # Store the log probability of the action
-                        #print("Actions: ", actions[step])
                     else:
                         # Obtain the action, log probability of the action, and value estimate from the policy network
                         action, logprob, _, value = agent.get_action_and_value(next_obs)
-                        values[step] = value.flatten()  # Flatten the value tensor for storage
-                        actions[step] = action  # Store the action
-                        logprobs[step] = logprob  # Store the log probability of the action
-                        #print("Actions: ", actions[step])
+                      
+                    values[step] = value.flatten()  # Flatten the value tensor for storage
+                    actions[step] = action  # Store the action
+                    logprobs[step] = logprob  # Store the log probability of the action
+                    #print("Actions: ", actions[step])
 
                 # TRY NOT TO MODIFY: execute the game and log data.
                 # Execute the action in the environment and log the results
