@@ -96,7 +96,7 @@ env = wrapper(env)
 obs, _ = env.reset()
 
 expert_agent = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0001, n_epochs=15)
-expert_agent.load("Expert_Agent")
+expert_agent.load("Expert_Agent_1m")
 
 # Making the environment
 def make_env(env_id, idx, capture_video, run_name):
@@ -261,6 +261,8 @@ if __name__ == "__main__":
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
 
+        beta_prob = random.random()
+
         # Iterate over each step in the rollout
         for step in range(0, args.num_steps):
             
@@ -273,7 +275,8 @@ if __name__ == "__main__":
                 # Disable gradient calculations for action selection as it's not part of the optimization process
                 with torch.no_grad():
                     # Obtain the action, log probability of the action, and value estimate from the policy network
-                    if random.random() < args.beta: # Probability of including expert trajectories in the rollout buffer
+                    if beta_prob <= args.beta: 
+                        # Probability of including expert trajectories in the rollout buffer
                         action, logprob, _, value = expert_actions_values(expert_agent, next_obs)
                     else:
                         # Obtain the action, log probability of the action, and value estimate from the policy network
@@ -301,8 +304,6 @@ if __name__ == "__main__":
                             writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                             writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
         
-        args.beta -= args.beta_decay
-        
         # Bootstrap value if not done
         # Use no gradient tracking for efficiency since this is only for inference, not training
         with torch.no_grad():
@@ -329,6 +330,8 @@ if __name__ == "__main__":
                 advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
             # The returns are the sum of the advantages and the value estimates
             returns = advantages + values
+
+        args.beta -= args.beta_decay
 
         # Flatten the batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
