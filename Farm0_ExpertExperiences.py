@@ -59,7 +59,7 @@ class Args:
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 64
     """the number of mini-batches"""
-    update_epochs: int = 10
+    update_epochs: int = 15
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -77,7 +77,7 @@ class Args:
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.05
+    beta_decay: float = 0.01
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -94,8 +94,9 @@ orignal_obs, _  = env.reset()
 env.farmgym_to_gym_observations = farmgym_to_gym_observations_flattened
 env = wrapper(env)
 obs, _ = env.reset()
+
 expert_agent = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0001, n_epochs=15)
-expert_agent.load("PPO_student")
+expert_agent.load("Expert_Agent")
 
 # Making the environment
 def make_env(env_id, idx, capture_video, run_name):
