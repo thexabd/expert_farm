@@ -75,9 +75,9 @@ class Args:
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
-    beta: float = 1
+    beta: float = 0
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.01
+    beta_decay: float = 0.0
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -275,7 +275,7 @@ if __name__ == "__main__":
                 # Disable gradient calculations for action selection as it's not part of the optimization process
                 with torch.no_grad():
                     # Obtain the action, log probability of the action, and value estimate from the policy network
-                    if beta_prob <= args.beta: 
+                    if beta_prob < args.beta: 
                         # Probability of including expert trajectories in the rollout buffer
                         action, logprob, _, value = expert_actions_values(expert_agent, next_obs)
                     else:
