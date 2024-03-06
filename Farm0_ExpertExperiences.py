@@ -75,9 +75,9 @@ class Args:
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
-    beta: float = 0
+    beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.0
+    beta_decay: float = 0.005
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -297,12 +297,18 @@ if __name__ == "__main__":
 
                 # If there are final info objects, which contain episodic summary data, log them
                 if "final_info" in infos:
+                    beta_prob = random.random()
+                    print(beta_prob)
+
                     for info in infos["final_info"]:
                         if info and "episode" in info:
                             # Print and log episodic return and length information using TensorBoard
                             print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                             writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                             writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+        
+        print(args.beta)
+        args.beta -= args.beta_decay
         
         # Bootstrap value if not done
         # Use no gradient tracking for efficiency since this is only for inference, not training
@@ -330,8 +336,6 @@ if __name__ == "__main__":
                 advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
             # The returns are the sum of the advantages and the value estimates
             returns = advantages + values
-
-        args.beta -= args.beta_decay
 
         # Flatten the batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
