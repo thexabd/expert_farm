@@ -95,8 +95,8 @@ env.farmgym_to_gym_observations = farmgym_to_gym_observations_flattened
 env = wrapper(env)
 obs, _ = env.reset()
 
-expert_agent = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0001, n_epochs=15)
-expert_agent.load("Expert_Agent_1m")
+#expert_agent = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0001, n_epochs=15)
+expert_agent = PPO.load("Expert_Agent_1m")
 
 # Making the environment
 def make_env(env_id, idx, capture_video, run_name):
