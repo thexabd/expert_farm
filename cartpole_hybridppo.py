@@ -100,12 +100,8 @@ def make_env(env_id, idx, capture_video, run_name):
             env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
-            env = Farm0()
-            orignal_obs, _  = env.reset()
-            # Wrap to change observation and action spaces and the step function
-            env.farmgym_to_gym_observations = farmgym_to_gym_observations_flattened
-            env = wrapper(env)
-            obs, _ = env.reset()
+            env = gym.make("CartPole-v1")
+            #orignal_obs, _  = env.reset()
         # Recording statistics for analysis
         env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
