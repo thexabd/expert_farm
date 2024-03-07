@@ -118,7 +118,6 @@ def make_env(env_id, idx, capture_video, run_name):
 
     return thunk
 
-
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -175,8 +174,6 @@ if __name__ == "__main__":
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-
-    
 
     if args.track:
         import wandb
@@ -265,49 +262,51 @@ if __name__ == "__main__":
 
         # Iterate over each step in the rollout
         for step in range(0, args.num_steps):
-            
-                global_step += args.num_envs # Increment the global step count by the number of parallel environments
-                obs[step] = next_obs # Record the current observation
-                #print("Obs: ", obs[step])
-                dones[step] = next_done # Record whether the current state is a terminal state
-                #print("Done: ", dones[step])
-                # ALGO LOGIC: action logic
-                # Disable gradient calculations for action selection as it's not part of the optimization process
-                with torch.no_grad():
+
+            global_step += args.num_envs # Increment the global step count by the number of parallel environments
+            obs[step] = next_obs # Record the current observation
+            print(next_obs)
+            #print("Obs: ", obs[step])
+            dones[step] = next_done # Record whether the current state is a terminal state
+            #print("Done: ", dones[step])
+
+            # ALGO LOGIC: action logic
+            # Disable gradient calculations for action selection as it's not part of the optimization process
+            with torch.no_grad():
+                # Obtain the action, log probability of the action, and value estimate from the policy network
+                if beta_prob < args.beta: 
+                    # Probability of including expert trajectories in the rollout buffer
+                    action, logprob, _, value = expert_actions_values(expert_agent, next_obs)
+                else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
-                    if beta_prob < args.beta: 
-                        # Probability of including expert trajectories in the rollout buffer
-                        action, logprob, _, value = expert_actions_values(expert_agent, next_obs)
-                    else:
-                        # Obtain the action, log probability of the action, and value estimate from the policy network
-                        action, logprob, _, value = agent.get_action_and_value(next_obs)
-                      
-                    values[step] = value.flatten()  # Flatten the value tensor for storage
-                    actions[step] = action  # Store the action
-                    logprobs[step] = logprob  # Store the log probability of the action
-                    #print("Actions: ", actions[step])
+                    action, logprob, _, value = agent.get_action_and_value(next_obs)
+                    
+                values[step] = value.flatten()  # Flatten the value tensor for storage
+                actions[step] = action  # Store the action
+                logprobs[step] = logprob  # Store the log probability of the action
+                #print("Actions: ", actions[step])
 
-                # TRY NOT TO MODIFY: execute the game and log data.
-                # Execute the action in the environment and log the results
-                next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
-                next_done = np.logical_or(terminations, truncations)  # Determine if the episode is done either by termination or truncation
-                rewards[step] = torch.tensor(reward).to(device).view(-1)  # Store the reward and move it to the device (e.g., GPU)
-                #print("Rewards: ", rewards[step])
-                next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)  # Convert the next observation and done signal to tensors and move to the device
+            # TRY NOT TO MODIFY: execute the game and log data.
+            # Execute the action in the environment and log the results
+            next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+            next_done = np.logical_or(terminations, truncations)  # Determine if the episode is done either by termination or truncation
+            rewards[step] = torch.tensor(reward).to(device).view(-1)  # Store the reward and move it to the device (e.g., GPU)
+            #print("Rewards: ", rewards[step])
+            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)  # Convert the next observation and done signal to tensors and move to the device
 
-                # If there are final info objects, which contain episodic summary data, log them
-                if "final_info" in infos:
-                    beta_prob = random.random()
-                    print(beta_prob)
+            # If there are final info objects, which contain episodic summary data, log them
+            if "final_info" in infos:
+                beta_prob = random.random()
+                #print(beta_prob)
 
-                    for info in infos["final_info"]:
-                        if info and "episode" in info:
-                            # Print and log episodic return and length information using TensorBoard
-                            print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                            writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                            writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+                for info in infos["final_info"]:
+                    if info and "episode" in info:
+                        # Print and log episodic return and length information using TensorBoard
+                        print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+                        writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
         
-        print(args.beta)
+        #print(args.beta)
         args.beta -= args.beta_decay
         
         # Bootstrap value if not done
@@ -446,3 +445,7 @@ if __name__ == "__main__":
 
     envs.close()
     writer.close()
+
+    for i in range(args.harvest_episodes):
+
+        en
