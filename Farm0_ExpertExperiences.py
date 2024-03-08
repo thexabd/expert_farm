@@ -309,6 +309,9 @@ if __name__ == "__main__":
         if args.beta >= 0:
             args.beta -= args.beta_decay
         
+        if args.beta < 0:
+            args.beta = 0
+        
         # Bootstrap value if not done
         # Use no gradient tracking for efficiency since this is only for inference, not training
         with torch.no_grad():
