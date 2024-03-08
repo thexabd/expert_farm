@@ -265,7 +265,6 @@ if __name__ == "__main__":
 
             global_step += args.num_envs # Increment the global step count by the number of parallel environments
             obs[step] = next_obs # Record the current observation
-            print(next_obs)
             #print("Obs: ", obs[step])
             dones[step] = next_done # Record whether the current state is a terminal state
             #print("Done: ", dones[step])
@@ -307,7 +306,8 @@ if __name__ == "__main__":
                         writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
         
         #print(args.beta)
-        args.beta -= args.beta_decay
+        if args.beta >= 0:
+            args.beta -= args.beta_decay
         
         # Bootstrap value if not done
         # Use no gradient tracking for efficiency since this is only for inference, not training
