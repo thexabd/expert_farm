@@ -78,7 +78,7 @@ class Args:
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.003
+    beta_decay: float = 0.008
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -97,7 +97,7 @@ env = wrapper(env)
 obs, _ = env.reset()
 
 #expert_agent = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0001, n_epochs=15)
-expert_agent = PPO.load("Expert_Agent_1m")
+expert_agent = PPO.load("Heuristic_Agent")
 
 # Making the environment
 def make_env(env_id, idx, capture_video, run_name):
@@ -451,7 +451,7 @@ if __name__ == "__main__":
     envs.close()
     writer.close()
 
-    torch.save(agent)
+    torch.save(agent, 'EI_PPO.pt')
     
     # Write a method to calculate harvest for 100 episodes
     # Track decrease of beta parameter throughout the learning process
