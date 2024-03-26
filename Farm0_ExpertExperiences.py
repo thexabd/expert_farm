@@ -21,7 +21,6 @@ from farmgym_games.game_catalogue.farm0.farm import env as Farm0
 from stable_baselines3 import PPO, A2C
 
 import numpy as np
-#from read import readExpertData
 
 @dataclass
 class Args:
@@ -45,7 +44,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Farm0"
     """the id of the environment"""
-    total_timesteps: int = 500000
+    total_timesteps: int = 300000
     """total timesteps of the experiments"""
     learning_rate: float = 0.0001
     """the learning rate of the optimizer"""
@@ -79,7 +78,7 @@ class Args:
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.005
+    beta_decay: float = 0.003
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -452,5 +451,7 @@ if __name__ == "__main__":
     envs.close()
     writer.close()
 
+    torch.save(agent)
+    
     # Write a method to calculate harvest for 100 episodes
     # Track decrease of beta parameter throughout the learning process
