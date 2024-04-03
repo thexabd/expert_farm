@@ -4,6 +4,12 @@ import torch.optim as optim
 from torch.distributions.categorical import Categorical
 import gymnasium as gym
 import numpy as np
+import os
+import tyro
+import time
+
+from farmgym_games.game_builder.utils_sb3 import farmgym_to_gym_observations_flattened, wrapper
+from farmgym_games.game_catalogue.farm0.farm import env as Farm0
 
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -123,47 +129,51 @@ class Agent(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(x)
 
-envs = gym.vector.SyncVectorEnv([make_env(args.env_id, i, args.capture_video, run_name) for i in range(args.num_envs)],)
-device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-agent = Agent(envs).to(device)
+if __name__ == "__main__":
+    #args = tyro.cli(Args)
+    #run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    envs = gym.vector.SyncVectorEnv([make_env("Farm0", i, False, "run_name") for i in range(1)],)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    agent = Agent(envs).to(device)
 
-# Load the state dict from the .pt file
-model_path = 'EI-PPO.pt'
-state_dict = torch.load(model_path)
 
-# Apply the loaded state dict to your model
-agent.load_state_dict(state_dict)
+    # Load the state dict from the .pt file
+    agent = torch.load('EI_PPO.pt', map_location='cpu')
 
-harvest_list = []
+    harvest_list = []
 
-for i in range(1):
+    for i in range(10):
 
-    obs, _ = envs.reset(seed=args.seed)
-    obs = torch.Tensor(next_obs).to(device)
-    done = False
+        obs, _ = envs.reset()
+        obs = torch.Tensor(obs).to(device)
+        done = False
 
-    while not done:
-        with torch.no_grad():
-            action, logprob, _, value = agent.get_action_and_value(obs)
+        while not done:
+            with torch.no_grad():
+                action, logprob, _, value = agent.get_action_and_value(obs)
 
-        #print(obs)
-        #print("Action: ", action)
-        next_obs, reward, done, truncations, infos = envs.step(action.cpu().numpy())
-        #new_obs, reward, done, _, _ = env.step(action) 
-        harvest = next_obs[0][11].item() * next_obs[0][10].item()
+            #print(obs)
+            #print("Action: ", action)
+            next_obs, reward, done, truncations, infos = envs.step(action.cpu().numpy())
+            #new_obs, reward, done, _, _ = envs.step(action.cpu().numpy().item()) 
+            #print(obs)
+            #print(obs[0][11].item())
+            harvest = obs[0][11].item() * obs[0][10].item()
+            
+            obs = torch.Tensor(next_obs).to(device)  # Convert the next observation to tensor and move to the device
         
-        obs = torch.Tensor(next_obs).to(device)  # Convert the next observation to tensor and move to the device
-    
-    #print(reward)
-    #print("End")
-    #print(obs)
-    if(next_obs[0][7].item()==11):
-        harvest_list.append(harvest)
-        #print("Final yield: ", harvest)
-    else:
-        harvest_list.append(0)
-        #print("Plant died")
+        #print(harvest)
+        #print("End")
+        #print(next_obs)
+        if(action.cpu().numpy().item()==7):
+            harvest_list.append(harvest)
+            #print("Final yield: ", harvest)
+        else:
+            harvest_list.append(0)
+            #print("Plant died")
 
-    # return harvest_list
+        # return harvest_list
 
-print(harvest_list)
+    print(harvest_list)
+
+    print(np.mean(harvest_list), " +/- ", np.std(harvest_list))
