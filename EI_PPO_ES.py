@@ -44,7 +44,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Farm0"
     """the id of the environment"""
-    total_timesteps: int = 500000
+    total_timesteps: int = 300000
     """total timesteps of the experiments"""
     learning_rate: float = 0.0001
     """the learning rate of the optimizer"""
@@ -78,7 +78,7 @@ class Args:
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.005
+    beta_decay: float = 0.008
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -97,7 +97,7 @@ env = wrapper(env)
 obs, _ = env.reset()
 
 #expert_agent = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0001, n_epochs=15)
-expert_agent = PPO.load("PPO_student_100000")
+expert_agent = PPO.load("Heuristic_Agent")
 
 # Making the environment
 def make_env(env_id, idx, capture_video, run_name):
@@ -139,6 +139,47 @@ def expert_actions_values(model, next_obs):
         value, log_prob, _ = policy.evaluate_actions(next_obs, action)
     
     return action, log_prob, 0, value
+
+def expert_policy(obs):
+
+    obs = obs[0]
+
+    action = 0
+
+    if obs[0].item() == 1:
+        action = 6
+    if obs[5].item() < 124:
+        action = 1
+    if obs[5].item() < 123:
+        action = 2
+    if obs[5].item() < 122:
+        action = 3
+    if obs[5].item() < 121:
+        action = 4
+    if obs[5].item() < 120:
+        action = 5
+    if obs[7].item() == 9:
+        action = 7
+    else:
+        action = 6
+
+    action = torch.tensor(action).to(device)
+    
+    return action
+
+def integrate_heuristic(state, action, agent):
+    # Assuming s is your state tensor
+    s = torch.tensor(s).float()  # Ensure s is a float tensor
+    
+    # Compute action probabilities and log probabilities with the policy network
+    action_probs = agent.actor(state)
+    probs = Categorical(logits=action_probs)
+    log_probs = probs.log_prob(action)
+    
+    # Compute the value estimate with the value network
+    value = agent.get_value(state)
+    
+    return log_probs, value
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -251,9 +292,6 @@ if __name__ == "__main__":
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
 
-    #mean_ep_len = []
-    #mean_ep_rew = []
-
     # Loop through the number of iterations defined for the training process
     for iteration in range(1, args.num_iterations + 1):
         # If learning rate annealing is enabled, adjust the learning rate based on the progress through the total iterations
@@ -269,6 +307,7 @@ if __name__ == "__main__":
 
         # Iterate over each step in the rollout
         for step in range(0, args.num_steps):
+
             global_step += args.num_envs # Increment the global step count by the number of parallel environments
             obs[step] = next_obs # Record the current observation
             #print("Obs: ", obs[step])
@@ -281,7 +320,8 @@ if __name__ == "__main__":
                 # Obtain the action, log probability of the action, and value estimate from the policy network
                 if beta_prob < args.beta: 
                     # Probability of including expert trajectories in the rollout buffer
-                    action, logprob, _, value = expert_actions_values(expert_agent, next_obs)
+                    action = expert_policy(next_obs)
+                    logprob, value = integrate_heuristic(next_obs, action, agent)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
                     action, logprob, _, value = agent.get_action_and_value(next_obs)
@@ -311,18 +351,11 @@ if __name__ == "__main__":
                         writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                         writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
                         
-                        x = info["episode"]["l"].item()
-                        y = info["episode"]["r"].item()
-                        
-                        avg_len.append(x)
-                        avg_reward.append(y)
-
+                        avg_len.append(info["episode"]["l"].item())
+                        avg_reward.append(info["episode"]["r"].item())
         
         average_len = sum(avg_len)/len(avg_len)
         average_rew = sum(avg_reward)/len(avg_reward)
-
-        #mean_ep_len.append(average_len)
-        #mean_ep_rew.append(average_rew)
 
         #print(args.beta)
         if args.beta >= 0:
@@ -455,7 +488,7 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         writer.add_scalar("charts/ep_len_mean", average_len, global_step)
-        writer.add_scalar("charts/ep_len_rew", average_rew, global_step)
+        writer.add_scalar("charts/ep_rew_mean", average_rew, global_step)
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
