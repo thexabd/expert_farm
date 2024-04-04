@@ -44,7 +44,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Farm0"
     """the id of the environment"""
-    total_timesteps: int = 300000
+    total_timesteps: int = 500000
     """total timesteps of the experiments"""
     learning_rate: float = 0.0001
     """the learning rate of the optimizer"""
@@ -78,7 +78,7 @@ class Args:
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.008
+    beta_decay: float = 0.005
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -97,7 +97,7 @@ env = wrapper(env)
 obs, _ = env.reset()
 
 #expert_agent = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0001, n_epochs=15)
-expert_agent = PPO.load("Heuristic_Agent")
+expert_agent = PPO.load("PPO_student_100000")
 
 # Making the environment
 def make_env(env_id, idx, capture_video, run_name):
@@ -251,6 +251,9 @@ if __name__ == "__main__":
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
 
+    #mean_ep_len = []
+    #mean_ep_rew = []
+
     # Loop through the number of iterations defined for the training process
     for iteration in range(1, args.num_iterations + 1):
         # If learning rate annealing is enabled, adjust the learning rate based on the progress through the total iterations
@@ -263,6 +266,9 @@ if __name__ == "__main__":
 
         # Iterate over each step in the rollout
         for step in range(0, args.num_steps):
+            
+            avg_len = []
+            avg_reward = []
 
             global_step += args.num_envs # Increment the global step count by the number of parallel environments
             obs[step] = next_obs # Record the current observation
@@ -305,7 +311,17 @@ if __name__ == "__main__":
                         print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                         writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                         writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+                        
+                        avg_len.append(info["episode"]["l"])
+                        avg_reward.append(info["episode"]["r"])
+
         
+        average_len = sum(avg_len)/len(avg_len)
+        average_rew = sum(avg_reward)/len(avg_reward)
+
+        #mean_ep_len.append(average_len)
+        #mean_ep_rew.append(average_rew)
+
         #print(args.beta)
         if args.beta >= 0:
             args.beta -= args.beta_decay
@@ -436,6 +452,8 @@ if __name__ == "__main__":
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
+        writer.add_scalar("charts/ep_len_mean", average_len, global_step)
+        writer.add_scalar("charts/ep_len_rew", average_rew, global_step)
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
