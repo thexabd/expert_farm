@@ -18,8 +18,6 @@ from torch.utils.tensorboard import SummaryWriter
 from farmgym_games.game_builder.utils_sb3 import farmgym_to_gym_observations_flattened, wrapper
 from farmgym_games.game_catalogue.farm0.farm import env as Farm0
 
-from stable_baselines3 import PPO, A2C
-
 import numpy as np
 
 @dataclass
@@ -44,7 +42,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Farm0"
     """the id of the environment"""
-    total_timesteps: int = 300000
+    total_timesteps: int = 500000
     """total timesteps of the experiments"""
     learning_rate: float = 0.0001
     """the learning rate of the optimizer"""
@@ -78,7 +76,7 @@ class Args:
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.008
+    beta_decay: float = 0.001
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -95,9 +93,6 @@ orignal_obs, _  = env.reset()
 env.farmgym_to_gym_observations = farmgym_to_gym_observations_flattened
 env = wrapper(env)
 obs, _ = env.reset()
-
-#expert_agent = PPO("MlpPolicy", env, verbose=1, learning_rate=0.0001, n_epochs=15)
-expert_agent = PPO.load("Heuristic_Agent")
 
 # Making the environment
 def make_env(env_id, idx, capture_video, run_name):
@@ -163,23 +158,9 @@ def expert_policy(obs):
     else:
         action = 6
 
-    action = torch.tensor(action).to(device)
+    action = torch.tensor(action).unsqueeze(0).to(device)
     
     return action
-
-def integrate_heuristic(state, action, agent):
-    # Assuming s is your state tensor
-    s = torch.tensor(s).float()  # Ensure s is a float tensor
-    
-    # Compute action probabilities and log probabilities with the policy network
-    action_probs = agent.actor(state)
-    probs = Categorical(logits=action_probs)
-    log_probs = probs.log_prob(action)
-    
-    # Compute the value estimate with the value network
-    value = agent.get_value(state)
-    
-    return log_probs, value
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -321,7 +302,7 @@ if __name__ == "__main__":
                 if beta_prob < args.beta: 
                     # Probability of including expert trajectories in the rollout buffer
                     action = expert_policy(next_obs)
-                    logprob, value = integrate_heuristic(next_obs, action, agent)
+                    action, logprob, _, value = agent.get_action_and_value(next_obs, action=action)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
                     action, logprob, _, value = agent.get_action_and_value(next_obs)
