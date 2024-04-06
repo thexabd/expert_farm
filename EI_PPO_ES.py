@@ -58,7 +58,7 @@ class Args:
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 64
     """the number of mini-batches"""
-    update_epochs: int = 15
+    update_epochs: int = 20
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -70,13 +70,13 @@ class Args:
     """coefficient of the entropy"""
     vf_coef: float = 0.5
     """coefficient of the value function"""
-    max_grad_norm: float = 0.5
+    max_grad_norm: float = 0.2
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.001
+    beta_decay: float = 0.005
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -138,22 +138,23 @@ def expert_actions_values(model, next_obs):
 def expert_policy(obs):
 
     obs = obs[0]
+    
+    water_obs = obs[5].item()
+    harvest_obs = obs[7].item()
 
-    action = 0
+    action = 6
 
-    if obs[0].item() == 1:
-        action = 6
-    if obs[5].item() < 124:
+    if water_obs < 124:
         action = 1
-    if obs[5].item() < 123:
+    if water_obs < 123:
         action = 2
-    if obs[5].item() < 122:
+    if water_obs < 122:
         action = 3
-    if obs[5].item() < 121:
+    if water_obs < 121:
         action = 4
-    if obs[5].item() < 120:
+    if water_obs < 120:
         action = 5
-    if obs[7].item() == 9:
+    if harvest_obs == 9:
         action = 7
     else:
         action = 6
@@ -272,6 +273,12 @@ if __name__ == "__main__":
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
+    
+    beta_prob = random.random()
+    if beta_prob < args.beta:
+        print("Expert Trajectory")
+    else:
+        print("Agent Trajectory")
 
     # Loop through the number of iterations defined for the training process
     for iteration in range(1, args.num_iterations + 1):
@@ -280,8 +287,6 @@ if __name__ == "__main__":
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
-
-        beta_prob = random.random()
 
         avg_len = []
         avg_reward = []
@@ -303,6 +308,7 @@ if __name__ == "__main__":
                     # Probability of including expert trajectories in the rollout buffer
                     action = expert_policy(next_obs)
                     action, logprob, _, value = agent.get_action_and_value(next_obs, action=action)
+                    #value = agent.get_value(next_obs)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
                     action, logprob, _, value = agent.get_action_and_value(next_obs)
@@ -334,16 +340,22 @@ if __name__ == "__main__":
                         
                         avg_len.append(info["episode"]["l"].item())
                         avg_reward.append(info["episode"]["r"].item())
-        
+                
+                if beta_prob < args.beta:
+                    print("Expert Trajectory")
+                else:
+                    print("Agent Trajectory")
+
         average_len = sum(avg_len)/len(avg_len)
         average_rew = sum(avg_reward)/len(avg_reward)
-
-        #print(args.beta)
+        
         if args.beta >= 0:
             args.beta -= args.beta_decay
         
         if args.beta < 0:
             args.beta = 0
+
+        #print(args.beta)
         
         # Bootstrap value if not done
         # Use no gradient tracking for efficiency since this is only for inference, not training
@@ -479,7 +491,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         writer.add_scalar("losses/beta", args.beta, global_step)
-        print("SPS:", int(global_step / (time.time() - start_time)))
+        #print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
