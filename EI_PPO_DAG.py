@@ -10,6 +10,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import tyro
 from torch.distributions.categorical import Categorical
@@ -160,8 +161,11 @@ def expert_policy(obs):
         action = 6
 
     action = torch.tensor(action).unsqueeze(0).to(device)
+
+    action_one_hot = torch.zeros(8)
+    action_one_hot[action] = 1.0
     
-    return action
+    return action, action_one_hot.to(device)
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -189,7 +193,7 @@ class Agent(nn.Module):
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x), logits
 
 
 if __name__ == "__main__":
@@ -246,6 +250,10 @@ if __name__ == "__main__":
     # The tensor is zero-initialized and shaped to hold the batch of actions from all environments over all steps.
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     exp_actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
+    
+    expert_actions_one_hot = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    probabilities = torch.zeros((args.num_steps, args.num_envs)).to(device)
+
     # Initialize the log probabilities tensor to store the log probabilities of the actions taken by the policy.
     # This is used later to compute the policy loss during optimization. It is zero-initialized.
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -293,7 +301,7 @@ if __name__ == "__main__":
 
         # Iterate over each step in the rollout
         for step in range(0, args.num_steps):
-
+            beta_prob = new_beta_prob
             global_step += args.num_envs # Increment the global step count by the number of parallel environments
             obs[step] = next_obs # Record the current observation
             #print("Obs: ", obs[step])
@@ -306,16 +314,18 @@ if __name__ == "__main__":
                 # Obtain the action, log probability of the action, and value estimate from the policy network
                 if beta_prob < args.beta: 
                     # Probability of including expert trajectories in the rollout buffer
-                    expert_action = expert_policy(next_obs)
-                    action, _, _, _ = agent.get_action_and_value(next_obs)
+                    expert_action, action_one_hot = expert_policy(next_obs)
+                    action, _, _, _, logits = agent.get_action_and_value(next_obs)
                     _, logprob, _, value = agent.get_action_and_value(next_obs, action=expert_action)
                     #value = agent.get_value(next_obs)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
-                    action, logprob, _, value = agent.get_action_and_value(next_obs)
+                    action, logprob, _, value, _ = agent.get_action_and_value(next_obs)
                     
                 values[step] = value.flatten()  # Flatten the value tensor for storage
                 actions[step] = action  # Store the action
+                probabilities[step] = logits
+                expert_actions_one_hot[step] = action_one_hot
                 logprobs[step] = logprob  # Store the log probability of the action
                 exp_actions[step] = expert_action
                 #print("Actions: ", actions[step])
@@ -334,7 +344,7 @@ if __name__ == "__main__":
 
             # If there are final info objects, which contain episodic summary data, log them
             if "final_info" in infos:
-                beta_prob = random.random()
+                new_beta_prob = random.random()
                 #print(beta_prob)
 
                 for info in infos["final_info"]:
@@ -390,9 +400,14 @@ if __name__ == "__main__":
             # The returns are the sum of the advantages and the value estimates
             returns = advantages + values
 
+        # Convert logits to probabilities
+        probabilities = torch.softmax(probabilities, dim=-1)
+
         # Flatten the batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
         b_logprobs = logprobs.reshape(-1)
+        b_one_hot = expert_actions_one_hot.reshape(-1)
+        b_logits = probabilities.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
         b_expert = exp_actions.reshape((-1,) + envs.single_action_space.shape)
         b_advantages = advantages.reshape(-1)
@@ -416,7 +431,7 @@ if __name__ == "__main__":
                 mb_inds = b_inds[start:end]
 
                 # Get the predicted log probabilities, entropy, and values for the current mini-batch
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+                _, newlogprob, entropy, newvalue, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
                 # Calculate the log differences between new and old probabilities
                 logratio = newlogprob - b_logprobs[mb_inds]
                 # Compute the ratio of new to old probabilities
@@ -461,8 +476,11 @@ if __name__ == "__main__":
                 # Calculate the entropy loss to encourage exploration by penalizing certainty
                 entropy_loss = entropy.mean()
 
-                # Total loss is the sum of policy loss, value loss (scaled by vf_coef), and entropy loss (scaled by ent_coef)
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                # Mimicry loss
+                mimicry_loss = F.cross_entropy(b_logits, b_one_hot)
+
+                # Total loss is the sum of policy loss, value loss (scaled by vf_coef), entropy loss (scaled by ent_coef), and mimicry loss (no scaling)
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + mimicry_loss
 
                 # Prepare for the gradient update
                 optimizer.zero_grad() # Zero out any existing gradients
