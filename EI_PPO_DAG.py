@@ -251,8 +251,8 @@ if __name__ == "__main__":
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     exp_actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     
-    expert_actions_one_hot = torch.zeros((args.num_steps, args.num_envs)).to(device)
-    probabilities = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    expert_actions_one_hot = torch.zeros(args.num_steps, 8).to(device)
+    probabilities = torch.zeros(args.num_steps, 8).to(device)
 
     # Initialize the log probabilities tensor to store the log probabilities of the actions taken by the policy.
     # This is used later to compute the policy loss during optimization. It is zero-initialized.
@@ -282,8 +282,8 @@ if __name__ == "__main__":
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     
-    beta_prob = random.random()
-    if beta_prob < args.beta:
+    new_beta_prob = random.random()
+    if new_beta_prob < args.beta:
         print("Expert Trajectory")
     else:
         print("Agent Trajectory")
@@ -316,7 +316,7 @@ if __name__ == "__main__":
                     # Probability of including expert trajectories in the rollout buffer
                     expert_action, action_one_hot = expert_policy(next_obs)
                     action, _, _, _, logits = agent.get_action_and_value(next_obs)
-                    _, logprob, _, value = agent.get_action_and_value(next_obs, action=expert_action)
+                    _, logprob, _, value, _ = agent.get_action_and_value(next_obs, action=expert_action)
                     #value = agent.get_value(next_obs)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
