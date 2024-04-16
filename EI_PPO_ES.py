@@ -42,7 +42,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Farm0"
     """the id of the environment"""
-    total_timesteps: int = 500000
+    total_timesteps: int = 1000000
     """total timesteps of the experiments"""
     learning_rate: float = 0.0001
     """the learning rate of the optimizer"""
@@ -56,9 +56,9 @@ class Args:
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 64
+    num_minibatches: int = 128
     """the number of mini-batches"""
-    update_epochs: int = 20
+    update_epochs: int = 50
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -76,7 +76,7 @@ class Args:
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.005
+    beta_decay: float = 0.003
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -307,7 +307,8 @@ if __name__ == "__main__":
                 if beta_prob < args.beta: 
                     # Probability of including expert trajectories in the rollout buffer
                     action = expert_policy(next_obs)
-                    action, logprob, _, value = agent.get_action_and_value(next_obs, action=action)
+                    logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device)
+                    value = agent.get_value(next_obs)
                     #value = agent.get_value(next_obs)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network

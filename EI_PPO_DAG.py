@@ -120,22 +120,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-def expert_actions_values(model, next_obs):
-    policy = model.policy
-    #policy.device = model.policy.device
-    policy.eval()
-
-    next_obs = torch.tensor(next_obs).to(policy.device)
-
-    with torch.no_grad():
-        action_dist = policy.get_distribution(next_obs)
-        logits = action_dist.distribution.logits
-        action = torch.argmax(logits, dim=-1)
-        # Evaluate the value and log probability of the chosen action
-        value, log_prob, _ = policy.evaluate_actions(next_obs, action)
-    
-    return action, log_prob, 0, value
-
 def expert_policy(obs):
 
     obs = obs[0]
@@ -251,8 +235,8 @@ if __name__ == "__main__":
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     exp_actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     
-    expert_actions_one_hot = torch.zeros(args.num_steps, 8).to(device)
-    probabilities = torch.zeros(args.num_steps, 8).to(device)
+    #expert_actions_one_hot = torch.zeros(args.num_steps, 8).to(device)
+    logits_list = torch.zeros(args.num_steps, 8).to(device)
 
     # Initialize the log probabilities tensor to store the log probabilities of the actions taken by the policy.
     # This is used later to compute the policy loss during optimization. It is zero-initialized.
@@ -311,21 +295,23 @@ if __name__ == "__main__":
             # ALGO LOGIC: action logic
             # Disable gradient calculations for action selection as it's not part of the optimization process
             with torch.no_grad():
-                # Obtain the action, log probability of the action, and value estimate from the policy network
-                if beta_prob < args.beta: 
-                    # Probability of including expert trajectories in the rollout buffer
-                    expert_action, action_one_hot = expert_policy(next_obs)
-                    action, _, _, _, logits = agent.get_action_and_value(next_obs)
-                    _, logprob, _, value, _ = agent.get_action_and_value(next_obs, action=expert_action)
+                # Obtain the expert action
+                expert_action, action_one_hot = expert_policy(next_obs)
+                if beta_prob < args.beta: # Probability of including expert trajectories in the rollout buffer
+                    # Obtain the action and value estimate from the policy network
+                    action, _, _, value, logits = agent.get_action_and_value(next_obs)
+                    expert_action, logprob, _, _, _ = agent.get_action_and_value(next_obs, action=expert_action)
+                    # Log probability = 0 (perfect action)
+                    #logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device)
                     #value = agent.get_value(next_obs)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
-                    action, logprob, _, value, _ = agent.get_action_and_value(next_obs)
+                    action, logprob, _, value, logits = agent.get_action_and_value(next_obs)
                     
                 values[step] = value.flatten()  # Flatten the value tensor for storage
                 actions[step] = action  # Store the action
-                probabilities[step] = logits
-                expert_actions_one_hot[step] = action_one_hot
+                logits_list[step] = logits
+                #expert_actions_one_hot[step] = action_one_hot
                 logprobs[step] = logprob  # Store the log probability of the action
                 exp_actions[step] = expert_action
                 #print("Actions: ", actions[step])
@@ -357,7 +343,7 @@ if __name__ == "__main__":
                         avg_len.append(info["episode"]["l"].item())
                         avg_reward.append(info["episode"]["r"].item())
                 
-                if beta_prob < args.beta:
+                if new_beta_prob < args.beta:
                     print("Expert Trajectory")
                 else:
                     print("Agent Trajectory")
@@ -401,13 +387,13 @@ if __name__ == "__main__":
             returns = advantages + values
 
         # Convert logits to probabilities
-        probabilities = torch.softmax(probabilities, dim=-1)
+        #probabilities = torch.softmax(probabilities, dim=-1)
 
         # Flatten the batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
         b_logprobs = logprobs.reshape(-1)
-        b_one_hot = expert_actions_one_hot.reshape(-1)
-        b_logits = probabilities.reshape(-1)
+        #b_one_hot = expert_actions_one_hot.reshape(-1)
+        b_logits = logits_list.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
         b_expert = exp_actions.reshape((-1,) + envs.single_action_space.shape)
         b_advantages = advantages.reshape(-1)
@@ -476,11 +462,13 @@ if __name__ == "__main__":
                 # Calculate the entropy loss to encourage exploration by penalizing certainty
                 entropy_loss = entropy.mean()
 
-                # Mimicry loss
-                mimicry_loss = F.cross_entropy(b_logits, b_one_hot)
-
                 # Total loss is the sum of policy loss, value loss (scaled by vf_coef), entropy loss (scaled by ent_coef), and mimicry loss (no scaling)
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + mimicry_loss
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+
+                # Mimicry loss
+                if args.beta > 0:
+                    mimicry_loss = F.cross_entropy(b_logits[mb_inds], b_expert[mb_inds])
+                    loss += mimicry_loss * args.beta
 
                 # Prepare for the gradient update
                 optimizer.zero_grad() # Zero out any existing gradients
@@ -511,6 +499,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
         writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+        writer.add_scalar("losses/mimicry", mimicry_loss.item(), global_step)
         writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)

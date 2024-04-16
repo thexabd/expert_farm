@@ -1,16 +1,16 @@
 observation-cost:
   Field-0:
     Weather-0:
+      year#int100: 1
       day#int365: 1
       air_temperature: 1
-      humidity_index#%: 1
+      humidity#%: 1
       wind: 1
-      sun_exposure#int5: 1
-      rain_amount: 1
-      rain_intensity: 1
+      clouds#%: 1
+      rain_amount#mm.day-1: 1
       consecutive_frost#day: 1
       consecutive_dry#day: 1
-      air_temperature.forecast: 1
+      forecast: 1
     Soil-0:
       available_N#g: 1
       available_P#g: 1
@@ -50,30 +50,9 @@ observation-cost:
       cumulated_stress_water#L: 1
       grow_size_threshold#cm: 1
       fruit_weight_threshold#g: 1
-    Fertilizer-0:
-      amount#kg: 1
-      total_cumulated_scattered_amount#kg: 1
     Pollinators-0:
       occurrence#bin: 1
       total_cumulated_occurrence#nb: 1
-    Weeds-0:
-      grow#nb: 1
-      seeds#nb: 1
-      flowers#nb: 1
-      total_cumulated_plot_population#nb: 1
-    Cide-0:
-      amount#kg: 1
-      total_cumulated_scattered_amount#kg: 1
-    Pests-0:
-      plot_population#nb: 1
-      onplant_population#nb: 1
-      total_cumulated_plot_population#nb: 1
-    Pollinators-1:
-      occurrence#bin: 1
-      total_cumulated_occurrence#nb: 1
-    Cide-1:
-      amount#kg: 1
-      total_cumulated_scattered_amount#kg: 1
 intervention-cost:
   Field-0:
     Soil-0:
@@ -84,23 +63,21 @@ intervention-cost:
       harvest: 1
       micro_harvest: 1
       remove: 1
-    Fertilizer-0:
-      scatter: 1
-      scatter_bag: 1
-    Weeds-0:
+  Field-0:
+    Soil-0:
+      water_discrete: 1
+      water_continuous: 1
+    Plant-0:
+      sow: 1
+      harvest: 1
+      micro_harvest: 1
       remove: 1
-    Cide-0:
-      scatter: 1
-      scatter_bag: 1
-    Cide-1:
-      scatter: 1
-      scatter_bag: 1
 reward-mix:
      weight_biodiversitycounts: 0.
      weight_resourceadded: 0.
      weight_soilmicrolife: 0.
      weight_harvest: 0.
-     weight_stagecount: 0.
+     weight_stagecount: 1.
      weight_stagetransition: 1.
 final-reward-mix:
      weight_biodiversitycounts: 0.
@@ -109,4 +86,3 @@ final-reward-mix:
      weight_harvest: 1.
      weight_stagecount: 0.
      weight_stagetransition: 0.
-
