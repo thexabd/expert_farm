@@ -137,8 +137,8 @@ if __name__ == "__main__":
     agent = Agent(envs).to(device)
 
 
-    # Load the state dict from the .pt file
-    agent = torch.load('EI_PPO.pt', map_location='cpu')
+    # Load the model from the .pt file
+    agent = torch.load('EI_PPO.pt').to(device)
 
     harvest_list = []
 
