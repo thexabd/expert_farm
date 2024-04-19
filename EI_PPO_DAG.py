@@ -235,7 +235,6 @@ if __name__ == "__main__":
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     exp_actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     
-    #expert_actions_one_hot = torch.zeros(args.num_steps, 8).to(device)
     logits_list = torch.zeros(args.num_steps, 8).to(device)
 
     # Initialize the log probabilities tensor to store the log probabilities of the actions taken by the policy.
@@ -253,11 +252,6 @@ if __name__ == "__main__":
     # Initialize the values tensor to store the value function estimates of the states as predicted by the value network.
     # These estimates are used to calculate the advantages for the policy update. It is zero-initialized.
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
-
-    # EXPERT DATA
-    # Load expert data from file data.txt
-    # reader = readExpertData()
-    # expert_obs, expert_actions, expert_rewards, expert_dones = reader.read_data_from_file('data.txt')
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -288,9 +282,7 @@ if __name__ == "__main__":
             beta_prob = new_beta_prob
             global_step += args.num_envs # Increment the global step count by the number of parallel environments
             obs[step] = next_obs # Record the current observation
-            #print("Obs: ", obs[step])
             dones[step] = next_done # Record whether the current state is a terminal state
-            #print("Done: ", dones[step])
 
             # ALGO LOGIC: action logic
             # Disable gradient calculations for action selection as it's not part of the optimization process
@@ -303,7 +295,6 @@ if __name__ == "__main__":
                     expert_action, logprob, _, _, _ = agent.get_action_and_value(next_obs, action=expert_action)
                     # Log probability = 0 (perfect action)
                     #logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device)
-                    #value = agent.get_value(next_obs)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
                     action, logprob, _, value, logits = agent.get_action_and_value(next_obs)
@@ -311,10 +302,8 @@ if __name__ == "__main__":
                 values[step] = value.flatten()  # Flatten the value tensor for storage
                 actions[step] = action  # Store the action
                 logits_list[step] = logits
-                #expert_actions_one_hot[step] = action_one_hot
                 logprobs[step] = logprob  # Store the log probability of the action
                 exp_actions[step] = expert_action
-                #print("Actions: ", actions[step])
 
             # TRY NOT TO MODIFY: execute the game and log data.
             # Execute the action in the environment and log the results
@@ -325,13 +314,11 @@ if __name__ == "__main__":
 
             next_done = np.logical_or(terminations, truncations)  # Determine if the episode is done either by termination or truncation
             rewards[step] = torch.tensor(reward).to(device).view(-1)  # Store the reward and move it to the device (e.g., GPU)
-            #print("Rewards: ", rewards[step])
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)  # Convert the next observation and done signal to tensors and move to the device
 
             # If there are final info objects, which contain episodic summary data, log them
             if "final_info" in infos:
                 new_beta_prob = random.random()
-                #print(beta_prob)
 
                 for info in infos["final_info"]:
                     if info and "episode" in info:
@@ -386,13 +373,9 @@ if __name__ == "__main__":
             # The returns are the sum of the advantages and the value estimates
             returns = advantages + values
 
-        # Convert logits to probabilities
-        #probabilities = torch.softmax(probabilities, dim=-1)
-
         # Flatten the batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
         b_logprobs = logprobs.reshape(-1)
-        #b_one_hot = expert_actions_one_hot.reshape(-1)
         b_logits = logits_list.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
         b_expert = exp_actions.reshape((-1,) + envs.single_action_space.shape)
@@ -468,7 +451,7 @@ if __name__ == "__main__":
                 # Mimicry loss
                 if args.beta > 0:
                     mimicry_loss = F.cross_entropy(b_logits[mb_inds], b_expert[mb_inds])
-                    loss += mimicry_loss * args.beta
+                    loss += mimicry_loss * 1
 
                 # Prepare for the gradient update
                 optimizer.zero_grad() # Zero out any existing gradients

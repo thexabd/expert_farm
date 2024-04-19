@@ -142,7 +142,7 @@ if __name__ == "__main__":
 
     harvest_list = []
 
-    for i in range(10):
+    for i in range(100):
 
         obs, _ = envs.reset()
         obs = torch.Tensor(obs).to(device)

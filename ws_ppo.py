@@ -42,7 +42,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Farm0"
     """the id of the environment"""
-    total_timesteps: int = 1000000
+    total_timesteps: int = 500000
     """total timesteps of the experiments"""
     learning_rate: float = 0.0001
     """the learning rate of the optimizer"""
@@ -56,9 +56,9 @@ class Args:
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 128
+    num_minibatches: int = 64
     """the number of mini-batches"""
-    update_epochs: int = 50
+    update_epochs: int = 20
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -76,7 +76,7 @@ class Args:
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.003
+    beta_decay: float = 0.005
     """decay rate of beta parameter"""
 
     # to be filled in runtime
@@ -118,50 +118,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
-
-def expert_actions_values(model, next_obs):
-    policy = model.policy
-    #policy.device = model.policy.device
-    policy.eval()
-
-    next_obs = torch.tensor(next_obs).to(policy.device)
-
-    with torch.no_grad():
-        action_dist = policy.get_distribution(next_obs)
-        logits = action_dist.distribution.logits
-        action = torch.argmax(logits, dim=-1)
-        # Evaluate the value and log probability of the chosen action
-        value, log_prob, _ = policy.evaluate_actions(next_obs, action)
-    
-    return action, log_prob, 0, value
-
-def expert_policy(obs):
-
-    obs = obs[0]
-    
-    water_obs = obs[5].item()
-    harvest_obs = obs[7].item()
-
-    action = 6
-
-    if water_obs < 124:
-        action = 1
-    if water_obs < 123:
-        action = 2
-    if water_obs < 122:
-        action = 3
-    if water_obs < 121:
-        action = 4
-    if water_obs < 120:
-        action = 5
-    if harvest_obs == 9:
-        action = 7
-    else:
-        action = 6
-
-    action = torch.tensor(action).unsqueeze(0).to(device)
-    
-    return action
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -233,7 +189,7 @@ if __name__ == "__main__":
 
     # Put agent to device and set optimizer
     agent = Agent(envs).to(device)
-    agent = torch.load('ws.pt', map_location='cpu')
+    agent = torch.load('ws.pt')
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # Roll out buffer

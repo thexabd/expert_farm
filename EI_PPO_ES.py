@@ -42,7 +42,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "Farm0"
     """the id of the environment"""
-    total_timesteps: int = 1000000
+    total_timesteps: int = 500000
     """total timesteps of the experiments"""
     learning_rate: float = 0.0001
     """the learning rate of the optimizer"""
@@ -56,9 +56,9 @@ class Args:
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 128
+    num_minibatches: int = 64
     """the number of mini-batches"""
-    update_epochs: int = 50
+    update_epochs: int = 20
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -74,9 +74,9 @@ class Args:
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
-    beta: float = 1
+    beta: float = 0
     """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.003
+    beta_decay: float = 0.005
     """decay rate of beta parameter"""
 
     # to be filled in runtime

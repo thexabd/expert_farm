@@ -15,6 +15,7 @@ import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.dataset import random_split
 import torch.nn.functional as F
 
 from farmgym_games.game_builder.utils_sb3 import farmgym_to_gym_observations_flattened, wrapper
@@ -175,7 +176,7 @@ if __name__ == "__main__":
     optimizer2 = optim.Adam(agent.parameters(), lr=0.1)
 
     # Load the NPZ file
-    data = np.load("WS_data_1000.npz")
+    data = np.load("WS_data_100000.npz")
     observations = data['expert_observations']  
     actions = data['expert_actions']  
     returns = data['expert_returns']
@@ -189,57 +190,117 @@ if __name__ == "__main__":
     expert_dataset_actor = ExpertDatasetActor(observations, actions)
     expert_dataset_critic = ExpertDatasetCritic(observations, returns)
 
+    train_size = int(0.8 * len(expert_dataset_actor))
+    test_size = len(expert_dataset_actor) - train_size
+
+    train_expert_dataset_actor, test_expert_dataset_actor = random_split(
+    expert_dataset_actor, [train_size, test_size]
+    )
+    train_expert_dataset_critic, test_expert_dataset_critic = random_split(
+    expert_dataset_critic, [train_size, test_size]
+    )
+
     # Create DataLoader for batching
-    expert_data_loader_actor = DataLoader(expert_dataset_actor, batch_size=64, shuffle=True)
-    expert_data_loader_critic = DataLoader(expert_dataset_critic, batch_size=64, shuffle=True)
+    train_expert_data_loader_actor = DataLoader(train_expert_dataset_actor, batch_size=64, shuffle=True)
+    test_expert_data_loader_actor = DataLoader(test_expert_dataset_actor, batch_size=64, shuffle=True)
+    train_expert_data_loader_critic = DataLoader(train_expert_dataset_critic, batch_size=64, shuffle=True)
+    test_expert_data_loader_critic = DataLoader(test_expert_dataset_critic, batch_size=64, shuffle=True)
 
     # Modify training loop for behavior cloning
-    def train_actor(agent, data_loader, optimizer, epochs):
-        mean_loss = []
-        for epoch in range(epochs):
-            mean_loss_epoch = []
-            for observations, expert_actions in data_loader:
-                observations = observations.to(device)
-                expert_actions = expert_actions.to(device)
-                predicted_actions = agent.actor(observations)
-                loss = F.cross_entropy(predicted_actions, expert_actions)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                mean_loss_epoch.append(loss.item())
-                print(f"Epoch {epoch}, Actor Loss: {loss.item()}")
-            mean_loss.append(sum(mean_loss_epoch)/len(mean_loss_epoch))
+    def train_actor(agent, data_loader, optimizer, epoch):
+        mean_loss_epoch = []  # List to store loss values for each batch
+    
+        for observations, expert_actions in data_loader:
+            agent.actor.train()
+            observations = observations.to(device)
+            expert_actions = expert_actions.to(device)
+            predicted_actions = agent.actor(observations)
+            loss = F.cross_entropy(predicted_actions, expert_actions)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            mean_loss_epoch.append(loss.item())
+            print(f"Actor Train Epoch {epoch}, Actor Loss: {loss.item()}")
         
+        # Calculate the mean loss over all batches
+        mean_loss = sum(mean_loss_epoch) / len(mean_loss_epoch)
         return mean_loss
     
-    def train_critic(agent, data_loader, optimizer, epochs):
-        mean_loss = []
-        for epoch in range(epochs):
-            mean_loss_epoch = []
-            for observations, expert_returns in data_loader:
-                observations = observations.to(device)
-                expert_returns = expert_returns.to(device).float()
-                predicted_values = agent.critic(observations)
-                predicted_values = predicted_values.squeeze()
-                loss = F.cross_entropy(predicted_values, expert_returns)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                mean_loss_epoch.append(loss.item())
-                print(f"Epoch {epoch}, Critic Loss: {loss.item()}")
-            mean_loss.append(sum(mean_loss_epoch)/len(mean_loss_epoch))
+    # Modify training loop for behavior cloning
+    def test_actor(agent, data_loader, epoch):
+        mean_loss_epoch = []  # List to store loss values for each batch
+    
+        for observations, expert_actions in data_loader:
+            agent.actor.eval()
+            observations = observations.to(device)
+            expert_actions = expert_actions.to(device)
+            predicted_actions = agent.actor(observations)
+            loss = F.cross_entropy(predicted_actions, expert_actions)
+            
+            mean_loss_epoch.append(loss.item())
+            print(f"Actor Test Epoch {epoch}, Actor Loss: {loss.item()}")
         
+        # Calculate the mean loss over all batches
+        mean_loss = sum(mean_loss_epoch) / len(mean_loss_epoch)
+        return mean_loss
+    
+    def train_critic(agent, data_loader, optimizer, epoch):
+        mean_loss_epoch = []  # List to store loss values for each batch
+
+        for observations, expert_returns in data_loader:
+            agent.critic.train()
+            observations = observations.to(device)
+            expert_returns = expert_returns.to(device).float()
+            predicted_values = agent.critic(observations)
+            predicted_values = predicted_values.squeeze()
+            loss = F.cross_entropy(predicted_values, expert_returns)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            mean_loss_epoch.append(loss.item())
+            print(f"Critic Train Epoch {epoch}, Critic Loss: {loss.item()}")
+        
+        # Calculate the mean loss over all batches
+        mean_loss = sum(mean_loss_epoch) / len(mean_loss_epoch)
         return mean_loss
 
-    actor_loss = train_actor(agent, expert_data_loader_actor, optimizer1, epochs=20)
-    critic_loss = train_critic(agent, expert_data_loader_critic, optimizer2, epochs=20)
+    # Modify training loop for behavior cloning
+    def test_critic(agent, data_loader, epoch):
+        mean_loss_epoch = []  # List to store loss values for each batch
     
-    plt.plot([i+1 for i in range(0, 20, 1)], actor_loss, label="Actor Train Loss")
-    plt.legend()
-    plt.show()
+        for observations, expert_returns in data_loader:
+            agent.critic.eval()
+            observations = observations.to(device)
+            expert_returns = expert_returns.to(device).float()
+            predicted_values = agent.critic(observations)
+            predicted_values = predicted_values.squeeze()
+            loss = F.cross_entropy(predicted_values, expert_returns)
+            
+            mean_loss_epoch.append(loss.item())
+            print(f"Critic Test Epoch {epoch}, Critic Loss: {loss.item()}")
+        
+        # Calculate the mean loss over all batches
+        mean_loss = sum(mean_loss_epoch) / len(mean_loss_epoch)
+        return mean_loss
 
-    plt.plot([i+1 for i in range(0, 20, 1)], critic_loss, label="Critic Train Loss")
-    plt.legend()
-    plt.show()
+    epochs = 20
+    train_loss_actor = []
+    test_loss_actor = []
+    train_loss_critic = []
+    test_loss_critic = []
+    for epoch in range(epochs):
+        train_loss_actor_epoch = train_actor(agent, train_expert_data_loader_actor, optimizer1, epoch)
+        test_loss_actor_epoch = test_actor(agent, test_expert_data_loader_actor, epoch)
+        train_loss_actor.append(train_loss_actor_epoch)
+        test_loss_actor.append(test_loss_actor_epoch)
+        train_loss_critic_epoch = train_critic(agent, train_expert_data_loader_critic, optimizer2, epoch)
+        test_loss_critic_epoch = test_critic(agent, train_expert_data_loader_critic, epoch)
+        train_loss_critic.append(train_loss_critic_epoch)
+        test_loss_critic.append(test_loss_critic_epoch)
+
+    print("Actor Training: ", train_loss_actor)
+    print("Actor Testing: ", test_loss_actor)
+    print("Critic Training: ", train_loss_critic)
+    print("Critic Testing: ", test_loss_critic)
 
     torch.save(agent, 'ws.pt')
