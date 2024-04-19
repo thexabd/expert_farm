@@ -134,20 +134,19 @@ if __name__ == "__main__":
     #run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     envs = gym.vector.SyncVectorEnv([make_env("Farm0", i, False, "run_name") for i in range(1)],)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    agent = Agent(envs).to(device)
 
-
-    # Load the model from the .pt file
-    agent = torch.load('EI_PPO.pt').to(device)
+    # Load the state dict from the .pt file
+    agent = torch.load('EI_PPO.pt', map_location='cpu').to(device)
 
     harvest_list = []
+    reward_list = []
 
     for i in range(100):
 
         obs, _ = envs.reset()
         obs = torch.Tensor(obs).to(device)
         done = False
-
+        cum_reward = 0
         while not done:
             with torch.no_grad():
                 action, logprob, _, value = agent.get_action_and_value(obs)
@@ -159,12 +158,14 @@ if __name__ == "__main__":
             #print(obs)
             #print(obs[0][11].item())
             harvest = obs[0][11].item() * obs[0][10].item()
-            
+            cum_reward += reward.item()
             obs = torch.Tensor(next_obs).to(device)  # Convert the next observation to tensor and move to the device
         
         #print(harvest)
         #print("End")
         #print(next_obs)
+        reward_list.append(cum_reward)
+
         if(action.cpu().numpy().item()==7):
             harvest_list.append(harvest)
             #print("Final yield: ", harvest)
@@ -174,6 +175,10 @@ if __name__ == "__main__":
 
         # return harvest_list
 
-    print(harvest_list)
+    print("Reward list: ", reward_list)
+
+    print(np.mean(reward_list), " +/- ", np.std(reward_list))
+
+    print("Harvest list: ", harvest_list)
 
     print(np.mean(harvest_list), " +/- ", np.std(harvest_list))
