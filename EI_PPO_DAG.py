@@ -51,7 +51,7 @@ class Args:
     """the number of parallel game environments"""
     num_steps: int = 2048
     """the number of steps to run in each environment per policy rollout"""
-    anneal_lr: bool = False
+    anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -59,7 +59,7 @@ class Args:
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 64
     """the number of mini-batches"""
-    update_epochs: int = 20
+    update_epochs: int = 10
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -69,16 +69,18 @@ class Args:
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
     ent_coef: float = 0.0
     """coefficient of the entropy"""
-    vf_coef: float = 0.5
+    vf_coef: float = 1
     """coefficient of the value function"""
     max_grad_norm: float = 0.2
     """the maximum norm for the gradient clipping"""
-    target_kl: float = None
+    target_kl: float = 0.0
     """the target KL divergence threshold"""
     beta: float = 1
     """probability of expert actions inclusion in rollout buffer"""
     beta_decay: float = 0.005
     """decay rate of beta parameter"""
+    mimicry_coef: float = 1
+    """coefficient of the mimicry"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -292,9 +294,9 @@ if __name__ == "__main__":
                 if beta_prob < args.beta: # Probability of including expert trajectories in the rollout buffer
                     # Obtain the action and value estimate from the policy network
                     action, _, _, value, logits = agent.get_action_and_value(next_obs)
-                    expert_action, logprob, _, _, _ = agent.get_action_and_value(next_obs, action=expert_action)
+                    #expert_action, logprob, _, _, _ = agent.get_action_and_value(next_obs, action=expert_action)
                     # Log probability = 0 (perfect action)
-                    #logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device)
+                    logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
                     action, logprob, _, value, logits = agent.get_action_and_value(next_obs)
@@ -450,7 +452,14 @@ if __name__ == "__main__":
 
                 # Mimicry loss
                 if args.beta > 0:
-                    mimicry_loss = F.cross_entropy(b_logits[mb_inds], b_expert[mb_inds])
+                    agent_actions = agent.actor(b_obs[mb_inds])
+                    agent_actions.requires_grad_(True)
+                    expert_actions = torch.tensor(b_expert[mb_inds]).long()
+                    agent_actions.requires_grad_(True)
+
+                    mimicry_loss = F.cross_entropy(agent_actions, expert_actions)
+
+                    #args.mimicry_coef = max(0.1, min(10.0, args.mimicry_coef))
                     loss += mimicry_loss * 1
 
                 # Prepare for the gradient update
@@ -466,6 +475,10 @@ if __name__ == "__main__":
         # Convert PyTorch tensors to NumPy arrays for predicted values and actual returns
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         
+        # Decay the clip coef
+        args.clip_coef -= args.beta_decay
+        args.clip_coef = max(0, args.clip_coef)
+
         # Calculate the variance of the actual returns to measure how much the returns vary
         var_y = np.var(y_true)
 
@@ -483,6 +496,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
         writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
         writer.add_scalar("losses/mimicry", mimicry_loss.item(), global_step)
+        writer.add_scalar("losses/total_loss", loss.item(), global_step)
         writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
@@ -495,6 +509,3 @@ if __name__ == "__main__":
     writer.close()
 
     torch.save(agent, 'EI_PPO.pt')
-    
-    # Write a method to calculate harvest for 100 episodes
-    # Track decrease of beta parameter throughout the learning process
