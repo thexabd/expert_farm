@@ -1,4 +1,4 @@
-# EXPERT INITIATED PPO
+# PPO
 
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppopy
 import os
@@ -74,10 +74,6 @@ class Args:
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
-    beta: float = 0
-    """probability of expert actions inclusion in rollout buffer"""
-    beta_decay: float = 0.005
-    """decay rate of beta parameter"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -118,50 +114,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
-
-def expert_actions_values(model, next_obs):
-    policy = model.policy
-    #policy.device = model.policy.device
-    policy.eval()
-
-    next_obs = torch.tensor(next_obs).to(policy.device)
-
-    with torch.no_grad():
-        action_dist = policy.get_distribution(next_obs)
-        logits = action_dist.distribution.logits
-        action = torch.argmax(logits, dim=-1)
-        # Evaluate the value and log probability of the chosen action
-        value, log_prob, _ = policy.evaluate_actions(next_obs, action)
-    
-    return action, log_prob, 0, value
-
-def expert_policy(obs):
-
-    obs = obs[0]
-    
-    water_obs = obs[5].item()
-    harvest_obs = obs[7].item()
-
-    action = 6
-
-    if water_obs < 124:
-        action = 1
-    if water_obs < 123:
-        action = 2
-    if water_obs < 122:
-        action = 3
-    if water_obs < 121:
-        action = 4
-    if water_obs < 120:
-        action = 5
-    if harvest_obs == 9:
-        action = 7
-    else:
-        action = 6
-
-    action = torch.tensor(action).unsqueeze(0).to(device)
-    
-    return action
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -273,12 +225,6 @@ if __name__ == "__main__":
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
-    
-    beta_prob = random.random()
-    if beta_prob < args.beta:
-        print("Expert Trajectory")
-    else:
-        print("Agent Trajectory")
 
     # Loop through the number of iterations defined for the training process
     for iteration in range(1, args.num_iterations + 1):
@@ -304,15 +250,10 @@ if __name__ == "__main__":
             # Disable gradient calculations for action selection as it's not part of the optimization process
             with torch.no_grad():
                 # Obtain the action, log probability of the action, and value estimate from the policy network
-                if beta_prob < args.beta: 
-                    # Probability of including expert trajectories in the rollout buffer
-                    action = expert_policy(next_obs)
-                    logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device)
-                    value = agent.get_value(next_obs)
-                    #value = agent.get_value(next_obs)
-                else:
-                    # Obtain the action, log probability of the action, and value estimate from the policy network
-                    action, logprob, _, value = agent.get_action_and_value(next_obs)
+                # Probability of including expert trajectories in the rollout buffer
+                
+                # Obtain the action, log probability of the action, and value estimate from the policy network
+                action, logprob, _, value = agent.get_action_and_value(next_obs)
                     
                 values[step] = value.flatten()  # Flatten the value tensor for storage
                 actions[step] = action  # Store the action
@@ -341,22 +282,9 @@ if __name__ == "__main__":
                         
                         avg_len.append(info["episode"]["l"].item())
                         avg_reward.append(info["episode"]["r"].item())
-                
-                if beta_prob < args.beta:
-                    print("Expert Trajectory")
-                else:
-                    print("Agent Trajectory")
 
         average_len = sum(avg_len)/len(avg_len)
         average_rew = sum(avg_reward)/len(avg_reward)
-        
-        if args.beta >= 0:
-            args.beta -= args.beta_decay
-        
-        if args.beta < 0:
-            args.beta = 0
-
-        #print(args.beta)
         
         # Bootstrap value if not done
         # Use no gradient tracking for efficiency since this is only for inference, not training
@@ -487,6 +415,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
         writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+        writer.add_scalar("losses/total_loss", loss.item(), global_step)
         writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
