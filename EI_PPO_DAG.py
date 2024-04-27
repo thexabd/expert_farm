@@ -63,7 +63,7 @@ class Args:
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
-    clip_coef: float = 0.2
+    clip_coef: float = 0.5
     """the surrogate clipping coefficient"""
     clip_vloss: bool = True
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
@@ -79,7 +79,7 @@ class Args:
     """probability of expert actions inclusion in rollout buffer"""
     beta_decay: float = 0.005
     """decay rate of beta parameter"""
-    mimicry_coef: float = 1
+    mimicry_coef: float = beta
     """coefficient of the mimicry"""
 
     # to be filled in runtime
@@ -183,11 +183,24 @@ class Agent(nn.Module):
 
 
 if __name__ == "__main__":
+    import argparse
+
+    # Define the argument parser
+    parser = argparse.ArgumentParser(description='Set parameters for the PPO algorithm including mimicry loss')
+    parser.add_argument('--mimicry_coef', type=float, default=-1, help='Coefficient of the mimicry loss')
+    
+    # Parse the command line arguments
+    arg = parser.parse_args()
+
     args = tyro.cli(Args)
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+
+    # Set mimicry loss from parsed argument
+    if arg.mimicry_coef > -1:
+        args.mimicry_coef = arg.mimicry_coef
 
     if args.track:
         import wandb
@@ -294,9 +307,9 @@ if __name__ == "__main__":
                 if beta_prob < args.beta: # Probability of including expert trajectories in the rollout buffer
                     # Obtain the action and value estimate from the policy network
                     action, _, _, value, logits = agent.get_action_and_value(next_obs)
-                    #expert_action, logprob, _, _, _ = agent.get_action_and_value(next_obs, action=expert_action)
+                    expert_action, logprob, _, _, _ = agent.get_action_and_value(next_obs, action=expert_action)
                     # Log probability = 0 (perfect action)
-                    logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device)
+                    #logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device)
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
                     action, logprob, _, value, logits = agent.get_action_and_value(next_obs)
