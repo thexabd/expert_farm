@@ -15,6 +15,7 @@ import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.dataset import random_split
 import torch.nn.functional as F
 
 from farmgym_games.game_builder.utils_sb3 import farmgym_to_gym_observations_flattened, wrapper
@@ -164,7 +165,7 @@ if __name__ == "__main__":
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate)
 
     # Step 1: Load the NPZ file
-    data = np.load("WS_data_1000.npz")
+    data = np.load("WS_data_10000.npz")
     observations = data['expert_observations']  # assuming states are stored under the key 'states'
     actions = data['expert_actions']  # assuming actions are stored under the key 'actions'
 
@@ -175,31 +176,69 @@ if __name__ == "__main__":
     # Create dataset object
     expert_dataset = ExpertDataset(observations, actions)
 
+    train_size = int(0.8 * len(expert_dataset))
+    test_size = len(expert_dataset) - train_size
+
+    train_expert_dataset, test_expert_dataset = random_split(
+    expert_dataset, [train_size, test_size]
+    )
+
     # Step 4: Create DataLoader for batching
-    expert_data_loader = DataLoader(expert_dataset, batch_size=64, shuffle=True)
+    train_expert_data_loader = DataLoader(train_expert_dataset, batch_size=64, shuffle=True)
+    test_expert_data_loader = DataLoader(test_expert_dataset, batch_size=64, shuffle=True)
 
     # Modify training loop for behavior cloning
-    def train_behavior_cloning(agent, data_loader, optimizer, epochs):
-        mean_loss = []
-        for epoch in range(epochs):
-            mean_loss_epoch = []
-            for observations, expert_actions in data_loader:
-                observations = observations.to(device)
-                expert_actions = expert_actions.to(device)
-                predicted_actions = agent.actor(observations)
-                loss = F.cross_entropy(predicted_actions, expert_actions)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                mean_loss_epoch.append(loss.item())
-                print(f"Epoch {epoch}, Loss: {loss.item()}")
-            mean_loss.append(sum(mean_loss_epoch)/len(mean_loss_epoch))
+    def train_behavior_cloning(agent, data_loader, optimizer, epoch):
+        mean_loss_epoch = []  # List to store loss values for each batch
+    
+        for observations, expert_actions in data_loader:
+            agent.actor.train()
+            observations = observations.to(device)
+            expert_actions = expert_actions.to(device)
+            predicted_actions = agent.actor(observations)
+            loss = F.cross_entropy(predicted_actions, expert_actions)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            mean_loss_epoch.append(loss.item())
+            print(f"Train Epoch {epoch}, Loss: {loss.item()}")
         
+        # Calculate the mean loss over all batches
+        mean_loss = sum(mean_loss_epoch) / len(mean_loss_epoch)
         return mean_loss
 
-    loss = train_behavior_cloning(agent, expert_data_loader, optimizer, epochs=20)
+    # Modify training loop for behavior cloning
+    def test_behavior_cloning(agent, data_loader, optimizer, epoch):
+        mean_loss_epoch = []  # List to store loss values for each batch
     
-    plt.plot([i+1 for i in range(0, 20, 1)], loss, label="Actor Train Loss")
+        for observations, expert_actions in data_loader:
+            agent.actor.eval()
+            observations = observations.to(device)
+            expert_actions = expert_actions.to(device)
+            predicted_actions = agent.actor(observations)
+            loss = F.cross_entropy(predicted_actions, expert_actions)
+            
+            mean_loss_epoch.append(loss.item())
+            print(f" Test Epoch {epoch}, Loss: {loss.item()}")
+        
+        # Calculate the mean loss over all batches
+        mean_loss = sum(mean_loss_epoch) / len(mean_loss_epoch)
+        return mean_loss
+
+    epochs = 20
+    train_loss = []
+    test_loss = []
+    for epoch in range(epochs):
+        train_loss_epoch = train_behavior_cloning(agent, train_expert_data_loader, optimizer, epoch)
+        test_loss_epoch = test_behavior_cloning(agent, test_expert_data_loader, optimizer, epoch)
+        train_loss.append(train_loss_epoch)
+        test_loss.append(test_loss_epoch)
+    
+    print(train_loss)
+    print(test_loss)
+
+    plt.plot([i+1 for i in range(0, 20, 1)], train_loss, label="Actor Train Loss")
+    plt.plot([i+1 for i in range(0, 20, 1)], test_loss, label="Actor Test Loss")
     plt.legend()
     plt.show()
 
