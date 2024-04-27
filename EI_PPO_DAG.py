@@ -79,8 +79,10 @@ class Args:
     """probability of expert actions inclusion in rollout buffer"""
     beta_decay: float = 0.005
     """decay rate of beta parameter"""
-    mimicry_coef: float = beta
+    mimicry_coef: float = 0
     """coefficient of the mimicry"""
+    variant: int = 0
+    """EI-PPO variant being trained"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -147,11 +149,8 @@ def expert_policy(obs):
         action = 6
 
     action = torch.tensor(action).unsqueeze(0).to(device)
-
-    action_one_hot = torch.zeros(8)
-    action_one_hot[action] = 1.0
     
-    return action, action_one_hot.to(device)
+    return action
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -179,7 +178,7 @@ class Agent(nn.Module):
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(x), logits
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
 
 
 if __name__ == "__main__":
@@ -188,7 +187,7 @@ if __name__ == "__main__":
     # Define the argument parser
     parser = argparse.ArgumentParser(description='Set parameters for the PPO algorithm including mimicry loss')
     parser.add_argument('--mimicry_coef', type=float, default=-1, help='Coefficient of the mimicry loss')
-    
+    parser.add_argument('--variant', type=int, choices=[1,2], default=1, help='Variant of EI-PPO trained')
     # Parse the command line arguments
     arg = parser.parse_args()
 
@@ -201,6 +200,10 @@ if __name__ == "__main__":
     # Set mimicry loss from parsed argument
     if arg.mimicry_coef > -1:
         args.mimicry_coef = arg.mimicry_coef
+    else:
+        args.mimicry_coef = args.beta
+        
+    args.variant = arg.variant
 
     if args.track:
         import wandb
@@ -249,8 +252,6 @@ if __name__ == "__main__":
     # The tensor is zero-initialized and shaped to hold the batch of actions from all environments over all steps.
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     exp_actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
-    
-    logits_list = torch.zeros(args.num_steps, 8).to(device)
 
     # Initialize the log probabilities tensor to store the log probabilities of the actions taken by the policy.
     # This is used later to compute the policy loss during optimization. It is zero-initialized.
@@ -303,20 +304,22 @@ if __name__ == "__main__":
             # Disable gradient calculations for action selection as it's not part of the optimization process
             with torch.no_grad():
                 # Obtain the expert action
-                expert_action, action_one_hot = expert_policy(next_obs)
+                expert_action = expert_policy(next_obs)
                 if beta_prob < args.beta: # Probability of including expert trajectories in the rollout buffer
                     # Obtain the action and value estimate from the policy network
-                    action, _, _, value, logits = agent.get_action_and_value(next_obs)
-                    expert_action, logprob, _, _, _ = agent.get_action_and_value(next_obs, action=expert_action)
-                    # Log probability = 0 (perfect action)
-                    #logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device)
+                    action, _, _, value = agent.get_action_and_value(next_obs)
+                    if args.variant == 1:
+                        _, logprob, _, _ = agent.get_action_and_value(next_obs, action=expert_action)
+                    elif args.variant == 2:
+                        logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device) # Log probability = 0 (perfect action)
+                    else:
+                        raise ValueError("Incorrect variant type")
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
-                    action, logprob, _, value, logits = agent.get_action_and_value(next_obs)
+                    action, logprob, _, value = agent.get_action_and_value(next_obs)
                     
                 values[step] = value.flatten()  # Flatten the value tensor for storage
                 actions[step] = action  # Store the action
-                logits_list[step] = logits
                 logprobs[step] = logprob  # Store the log probability of the action
                 exp_actions[step] = expert_action
 
@@ -391,7 +394,6 @@ if __name__ == "__main__":
         # Flatten the batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
         b_logprobs = logprobs.reshape(-1)
-        b_logits = logits_list.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
         b_expert = exp_actions.reshape((-1,) + envs.single_action_space.shape)
         b_advantages = advantages.reshape(-1)
@@ -415,7 +417,7 @@ if __name__ == "__main__":
                 mb_inds = b_inds[start:end]
 
                 # Get the predicted log probabilities, entropy, and values for the current mini-batch
-                _, newlogprob, entropy, newvalue, _ = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
                 # Calculate the log differences between new and old probabilities
                 logratio = newlogprob - b_logprobs[mb_inds]
                 # Compute the ratio of new to old probabilities
@@ -473,7 +475,7 @@ if __name__ == "__main__":
                     mimicry_loss = F.cross_entropy(agent_actions, expert_actions)
 
                     #args.mimicry_coef = max(0.1, min(10.0, args.mimicry_coef))
-                    loss += mimicry_loss * 1
+                    loss += mimicry_loss * args.mimicry_coef
 
                 # Prepare for the gradient update
                 optimizer.zero_grad() # Zero out any existing gradients
