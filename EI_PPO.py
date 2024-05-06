@@ -1,6 +1,6 @@
 # EXPERT INITIATED PPO
 
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppopy
+# code adapted from https://docs.cleanrl.dev/rl-algorithms/ppo/#ppopy
 import os
 import random
 import time
@@ -15,11 +15,10 @@ import torch.optim as optim
 import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
+import argparse
 
 from farmgym_games.game_builder.utils_sb3 import farmgym_to_gym_observations_flattened, wrapper
 from farmgym_games.game_catalogue.farm0.farm import env as Farm0
-
-import numpy as np
 
 @dataclass
 class Args:
@@ -182,7 +181,6 @@ class Agent(nn.Module):
 
 
 if __name__ == "__main__":
-    import argparse
 
     # Define the argument parser
     parser = argparse.ArgumentParser(description='Set parameters for the PPO algorithm including mimicry loss')
@@ -191,18 +189,23 @@ if __name__ == "__main__":
     # Parse the command line arguments
     arg = parser.parse_args()
 
+    # Raise error if variant is not 1 or 2
+    if arg.variant != 1 or arg.variant != 2:
+        raise ValueError("Incorrect variant type")
+    
     args = tyro.cli(Args)
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{args.env_id}_{args.exp_name}_{int(time.time())}"
 
     # Set mimicry loss from parsed argument
     if arg.mimicry_coef > -1:
         args.mimicry_coef = arg.mimicry_coef
     else:
         args.mimicry_coef = args.beta
-        
+
+    # Set variant id from parsed argument    
     args.variant = arg.variant
 
     if args.track:
@@ -245,11 +248,11 @@ if __name__ == "__main__":
     # ALGO Logic: Storage setup
     
     # Initialize the observation tensor to store observations for each step and environment.
-    # The tensor is zero-initialized and shaped to accommodate the batch of observations from all environments over all steps.
+    # The tensor is zero-initialized and shaped to accommodate the batch of observations from the environment over all steps.
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
 
-    # Initialize the actions tensor to store actions taken by the policy for each step and environment.
-    # The tensor is zero-initialized and shaped to hold the batch of actions from all environments over all steps.
+    # Initialize the actions tensor to store actions taken by the policy and expert for each step and environment.
+    # The tensor is zero-initialized and shaped to hold the batch of actions from the environment over all steps.
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     exp_actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
 
@@ -257,11 +260,11 @@ if __name__ == "__main__":
     # This is used later to compute the policy loss during optimization. It is zero-initialized.
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
-    # Initialize the rewards tensor to store the rewards received at each step for each environment.
+    # Initialize the rewards tensor to store the rewards received at each step of the environment.
     # This will be used to compute returns and advantages for the policy update. It is zero-initialized.
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
-    # Initialize the dones tensor to keep track of whether an episode has ended (done signal) at each step for each environment.
+    # Initialize the dones tensor to keep track of whether an episode has ended (done signal) at each step of the environment.
     # The done signal is important for resetting the environments and correctly calculating advantages. It is zero-initialized.
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
@@ -276,6 +279,7 @@ if __name__ == "__main__":
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     
+    # Pick if expert trajectory or not using probability beta
     new_beta_prob = random.random()
     if new_beta_prob < args.beta:
         print("Expert Trajectory")
@@ -308,12 +312,12 @@ if __name__ == "__main__":
                 if beta_prob < args.beta: # Probability of including expert trajectories in the rollout buffer
                     # Obtain the action and value estimate from the policy network
                     action, _, _, value = agent.get_action_and_value(next_obs)
+                    # If EI-PPO-1, obtain log prob of expert action from agent's probability distribution
                     if args.variant == 1:
                         _, logprob, _, _ = agent.get_action_and_value(next_obs, action=expert_action)
+                    # If EI-PPO-2, set log prob of expert action to 0
                     elif args.variant == 2:
-                        logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device) # Log probability = 0 (perfect action)
-                    else:
-                        raise ValueError("Incorrect variant type")
+                        logprob = torch.tensor(0.0, requires_grad=True).unsqueeze(0).to(device) # Log probability = 0 (perfect action)    
                 else:
                     # Obtain the action, log probability of the action, and value estimate from the policy network
                     action, logprob, _, value = agent.get_action_and_value(next_obs)
@@ -325,6 +329,8 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: execute the game and log data.
             # Execute the action in the environment and log the results
+
+            # With probability beta, execute expert's action in the environment or policy's action with probability 1-beta
             if beta_prob < args.beta:
                 next_obs, reward, terminations, truncations, infos = envs.step(expert_action.cpu().numpy())
             else:
@@ -336,6 +342,7 @@ if __name__ == "__main__":
 
             # If there are final info objects, which contain episodic summary data, log them
             if "final_info" in infos:
+                # Get new beta prob value for picking expert trajectory
                 new_beta_prob = random.random()
 
                 for info in infos["final_info"]:
@@ -352,17 +359,18 @@ if __name__ == "__main__":
                     print("Expert Trajectory")
                 else:
                     print("Agent Trajectory")
-
+        
+        # Calculating average length and reward for trajectories in the rollout buffer
         average_len = sum(avg_len)/len(avg_len)
         average_rew = sum(avg_reward)/len(avg_reward)
         
+        # Decay beta
         if args.beta >= 0:
             args.beta -= args.beta_decay
         
+        # Decay only upto 0
         if args.beta < 0:
             args.beta = 0
-
-        #print(args.beta)
         
         # Bootstrap value if not done
         # Use no gradient tracking for efficiency since this is only for inference, not training
@@ -467,14 +475,17 @@ if __name__ == "__main__":
 
                 # Mimicry loss
                 if args.beta > 0:
+                    # Get logits for policy actions
                     agent_actions = agent.actor(b_obs[mb_inds])
                     agent_actions.requires_grad_(True)
+                    # Get expert action for the same observation
                     expert_actions = torch.tensor(b_expert[mb_inds]).long()
                     agent_actions.requires_grad_(True)
 
+                    # Compute mimicry loss using cross entropy
                     mimicry_loss = F.cross_entropy(agent_actions, expert_actions)
 
-                    #args.mimicry_coef = max(0.1, min(10.0, args.mimicry_coef))
+                    # Add to loss with mimicry coefficient
                     loss += mimicry_loss * args.mimicry_coef
 
                 # Prepare for the gradient update
