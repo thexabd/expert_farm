@@ -1,6 +1,6 @@
 # PPO
+# code adapted from https://docs.cleanrl.dev/rl-algorithms/ppo/#ppopy
 
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppopy
 import os
 import random
 import time
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{args.env_id}_{args.exp_name}_{int(time.time())}"
 
     if args.track:
         import wandb
@@ -191,33 +191,28 @@ if __name__ == "__main__":
     # ALGO Logic: Storage setup
     
     # Initialize the observation tensor to store observations for each step and environment.
-    # The tensor is zero-initialized and shaped to accommodate the batch of observations from all environments over all steps.
+    # The tensor is zero-initialized and shaped to accommodate the batch of observations from the environment over all steps.
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
 
     # Initialize the actions tensor to store actions taken by the policy for each step and environment.
-    # The tensor is zero-initialized and shaped to hold the batch of actions from all environments over all steps.
+    # The tensor is zero-initialized and shaped to hold the batch of actions from the environment over all steps.
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
 
     # Initialize the log probabilities tensor to store the log probabilities of the actions taken by the policy.
     # This is used later to compute the policy loss during optimization. It is zero-initialized.
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
-    # Initialize the rewards tensor to store the rewards received at each step for each environment.
+    # Initialize the rewards tensor to store the rewards received at each step of the environment.
     # This will be used to compute returns and advantages for the policy update. It is zero-initialized.
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
-    # Initialize the dones tensor to keep track of whether an episode has ended (done signal) at each step for each environment.
+    # Initialize the dones tensor to keep track of whether an episode has ended (done signal) at each step of the environment.
     # The done signal is important for resetting the environments and correctly calculating advantages. It is zero-initialized.
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
     # Initialize the values tensor to store the value function estimates of the states as predicted by the value network.
     # These estimates are used to calculate the advantages for the policy update. It is zero-initialized.
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
-
-    # EXPERT DATA
-    # Load expert data from file data.txt
-    # reader = readExpertData()
-    # expert_obs, expert_actions, expert_rewards, expert_dones = reader.read_data_from_file('data.txt')
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -242,9 +237,7 @@ if __name__ == "__main__":
 
             global_step += args.num_envs # Increment the global step count by the number of parallel environments
             obs[step] = next_obs # Record the current observation
-            #print("Obs: ", obs[step])
             dones[step] = next_done # Record whether the current state is a terminal state
-            #print("Done: ", dones[step])
 
             # ALGO LOGIC: action logic
             # Disable gradient calculations for action selection as it's not part of the optimization process
@@ -253,25 +246,20 @@ if __name__ == "__main__":
                 # Probability of including expert trajectories in the rollout buffer
                 
                 # Obtain the action, log probability of the action, and value estimate from the policy network
-                action, logprob, _, value = agent.get_action_and_value(next_obs)
-                    
+                action, logprob, _, value = agent.get_action_and_value(next_obs)    
                 values[step] = value.flatten()  # Flatten the value tensor for storage
                 actions[step] = action  # Store the action
                 logprobs[step] = logprob  # Store the log probability of the action
-                #print("Actions: ", actions[step])
 
             # TRY NOT TO MODIFY: execute the game and log data.
             # Execute the action in the environment and log the results
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)  # Determine if the episode is done either by termination or truncation
             rewards[step] = torch.tensor(reward).to(device).view(-1)  # Store the reward and move it to the device (e.g., GPU)
-            #print("Rewards: ", rewards[step])
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)  # Convert the next observation and done signal to tensors and move to the device
 
             # If there are final info objects, which contain episodic summary data, log them
             if "final_info" in infos:
-                beta_prob = random.random()
-                #print(beta_prob)
 
                 for info in infos["final_info"]:
                     if info and "episode" in info:
@@ -283,6 +271,7 @@ if __name__ == "__main__":
                         avg_len.append(info["episode"]["l"].item())
                         avg_reward.append(info["episode"]["r"].item())
 
+        # Calculating average length and reward for trajectories in the rollout buffer
         average_len = sum(avg_len)/len(avg_len)
         average_rew = sum(avg_reward)/len(avg_reward)
         
@@ -409,8 +398,8 @@ if __name__ == "__main__":
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        writer.add_scalar("charts/ep_len_mean", average_len, global_step)
-        writer.add_scalar("charts/ep_rew_mean", average_rew, global_step)
+        writer.add_scalar("rollout/ep_len_mean", average_len, global_step)
+        writer.add_scalar("rollout/ep_rew_mean", average_rew, global_step)
         writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
         writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
         writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
@@ -420,14 +409,10 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        writer.add_scalar("losses/beta", args.beta, global_step)
         #print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
     writer.close()
 
-    torch.save(agent, 'EI_PPO.pt')
-    
-    # Write a method to calculate harvest for 100 episodes
-    # Track decrease of beta parameter throughout the learning process
+    torch.save(agent, 'PPO.pt')
