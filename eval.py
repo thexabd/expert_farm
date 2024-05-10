@@ -67,7 +67,7 @@ class Agent(nn.Module):
 if __name__ == "__main__":
     # Define the argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_loc', help='Location of the saved model')
+    parser.add_argument('--model_loc', type=str, help='Location of the saved model')
     # Parse the command line arguments
     arg = parser.parse_args()
 
