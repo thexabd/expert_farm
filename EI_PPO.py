@@ -190,7 +190,7 @@ if __name__ == "__main__":
     arg = parser.parse_args()
 
     # Raise error if variant is not 1 or 2
-    if arg.variant != 1 or arg.variant != 2:
+    if arg.variant != 1 and arg.variant != 2:
         raise ValueError("Incorrect variant type")
     
     args = tyro.cli(Args)
